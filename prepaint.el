@@ -4,11 +4,12 @@
 
 ;; Author: Anders Lindgren
 ;; Keywords: c, languages, faces
-;; Version: 0.0.0
+;; Version: 0.0.1
+;; URL: https://github.com/Lindydancer/prepaint
 
 ;; Prepaint is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
-;; the Free Software Foundation; either version 2, or (at your option)
+;; the Free Software Foundation; either version 3, or (at your option)
 ;; any later version.
 
 ;; Prepaint is distributed in the hope that it will be useful,
@@ -26,20 +27,27 @@
 ;;{{{ Documentation
 
 ;; *Prepaint* is an Emacs package that highlight C-style preprocessor
-;; statements. The main feature is support for macros that span
+;; directives. The main feature is support for macros that span
 ;; multiple lines.
 ;;
 ;; Prepaint is implemented as two minor modes: `prepaint-mode' and
-;; `global-prepaint-mode'.  The former can be applied to individual buffers
-;; and the latter to all buffers.
+;; `prepaint-global-mode'. The former can be applied to individual
+;; buffers and the latter to all buffers.
+
+;; Usage:
+;;
+;; Place the source file in a directory in the load path. Add the
+;; following lines to an appropriate init file:
+;;
+;;    (require 'prepaint)
 ;;
 ;; Activate this package by Customize, or by placing the following line
 ;; into the appropriate init file:
 ;;
-;;    (global-prepaint-mode 1)
+;;    (prepaint-global-mode 1)
 ;;
 ;; This package use Fone Lock mode, so `font-lock-mode' or
-;; `global-font-lock-mode' must be enabled.
+;; `global-font-lock-mode' must be enabled (which it is by default).
 
 ;; Example:
 ;;
@@ -54,78 +62,15 @@
 
 ;;{{{ Dependencies
 
-(eval-when-compile (require 'cl))
-
-(require 'custom)
-(require 'font-lock)
-(require 'cc-mode)
+(eval-when-compile
+  (require 'cl))
 
 ;;}}}
 ;;{{{ Variables
 
 (defgroup prepaint nil
-  "Paint preprocessor lines in a different color."
+  "Highlight preprocessor directives for C-like languages."
   :group 'faces)
-
-(defvar prepaint-mode nil
-  "*Non-nil when Prepaint mode is active.
-
-Never set this variable directly, use the command `prepaint-mode'
-instead.")
-
-(defcustom global-prepaint-mode nil
-  "When on, proprocessor lines are in a different color.
-
-Set this variable using \\[customize] or use the command
-`global-prepaint-mode'."
-  :group 'prepaint
-  :initialize 'custom-initialize-default
-  :set '(lambda (symbol value)
-	  (global-prepaint-mode (or value 0)))
-  :type 'boolean
-  :require 'prepaint)
-
-(defcustom prepaint-verbose t
-  "When nil, Prepaint mode will not generate any messages.
-
-Currently, messages are generated when the mode is activated and
-deactivated."
-  :group 'prepaint
-  :type 'boolean)
-
-(defcustom prepaint-mode-text " Prepaint"
-  "String to display in the mode line when Prepaint mode is active.
-
-\(When the string is not empty, make sure that it has a leading space.)"
-  :tag "Prepaint mode text"                ; To separate it from `global-...'
-  :group 'prepaint
-  :type 'string)
-
-(defcustom prepaint-mode-hook nil
-  "Functions to run when Prepaint mode is activated."
-  :tag "Prepaint mode hook"                ; To separate it from `global-...'
-  :group 'prepaint
-  :type 'hook)
-
-(defcustom global-prepaint-mode-text ""
-  "String to display when Global Prepaint mode is active.
-
-The default is nothing since when this mode is active this text doesn't
-vary over time, or between buffers.  Hence mode line text
-would only waste precious space."
-  :group 'prepaint
-  :type 'string)
-
-(defcustom global-prepaint-mode-hook nil
-  "Hook called when Global Prepaint mode is activated."
-  :group 'prepaint
-  :type 'hook)
-
-(defcustom prepaint-load-hook nil
-  "Functions to run when Prepaint mode is first loaded."
-  :tag "Load Hook"
-  :group 'prepaint
-  :type 'hook)
 
 
 (defface prepaint-face
@@ -133,86 +78,36 @@ would only waste precious space."
   "Face for prepaint."
   :group 'prepaint)
 
-(defvar prepaint-modes '(c-mode c++-mode objc-mode))
+(defcustom prepaint-modes '(c-mode c++-mode objc-mode)
+  "List of major modes where Prepaint Global mode should be enabled."
+  :group 'prepaint
+  :type '(repeat symbol))
 
 ;;}}}
 ;;{{{ The modes
 
 ;;;###autoload
-(defun prepaint-mode (&optional arg)
-  "Minor mode that paints preprocessor lines in a different color."
-  (interactive "P")
-  (make-local-variable 'prepaint-mode)
-  (setq prepaint-mode
-	(if (null arg)
-	    (not prepaint-mode)
-	  (> (prefix-numeric-value arg) 0)))
-  (if (and prepaint-verbose
-	   (interactive-p))
-      (message "Prepaint mode is now %s."
-	       (if prepaint-mode "on" "off")))
-  (if (not global-prepaint-mode)
-      (if prepaint-mode
-	  (prepaint-font-lock-add-keywords)
-	(prepaint-font-lock-remove-keywords)))
-  (font-lock-fontify-buffer)
+(define-minor-mode prepaint-mode
+  "Minor mode that highlight preprocessor directives."
+  nil
+  nil
+  nil
+  :group 'prepaint
   (if prepaint-mode
-      (run-hooks 'prepaint-mode-hook)))
+      (prepaint-font-lock-add-keywords)
+    (prepaint-font-lock-remove-keywords))
+  (when font-lock-mode
+    (font-lock-fontify-buffer)))
+
 
 ;;;###autoload
-(defun turn-on-prepaint-mode ()
-  "Turn on Prepaint mode.
-
-This function is designed to be added to hooks, for example:
-  (add-hook 'c-mode-hook 'turn-on-prepaint-mode)"
-  (prepaint-mode 1))
-
-;;;###autoload
-(defun global-prepaint-mode (&optional arg)
-  "Paint processors lines in a different color in all buffers.
-
-With arg, turn Prepaint mode on globally if and only if arg is positive."
-  (interactive "P")
-  (let ((old-global-prepaint-mode global-prepaint-mode))
-    (setq global-prepaint-mode
-	  (if (null arg)
-	      (not global-prepaint-mode)
-	    (> (prefix-numeric-value arg) 0)))
-    (if (and prepaint-verbose
-	     (interactive-p))
-	(message "Global Prepaint mode is now %s."
-		 (if global-prepaint-mode "on" "off")))
-    (when (not (eq global-prepaint-mode old-global-prepaint-mode))
-      ;; Update for all future buffers.
-      (dolist (mode prepaint-modes)
-	(if global-prepaint-mode
-	    (prepaint-font-lock-add-keywords mode)
-	  (prepaint-font-lock-remove-keywords mode)))
-      ;; Update all existing buffers.
-      (save-excursion
-	(dolist (buffer (buffer-list))
-	  (set-buffer buffer)
-	  ;; Update keywords in alive buffers.
-	  (when (and font-lock-mode
-		     (not prepaint-mode)
-		     (prepaint-is-enabled major-mode))
-	    (if global-prepaint-mode
-		(prepaint-font-lock-add-keywords)
-	      (prepaint-font-lock-remove-keywords))
-	    (font-lock-fontify-buffer))))))
-    ;; Kills all added keywords :-(
-    ;; (font-lock-mode 0)
-    ;; (makunbound 'font-lock-keywords)
-    ;; (font-lock-mode 1))))
-  (when global-prepaint-mode
-    (run-hooks 'global-prepaint-mode-hook)))
-
-;;}}}
-;;{{{ Help functions
-
-(defun prepaint-is-enabled (mode)
-  "Non-nil if Prepaint FEATURE is enabled for MODE."
-  c-buffer-is-cc-mode)
+(define-global-minor-mode prepaint-global-mode prepaint-mode
+  ;; Bizarre interface, `define-global-minor-mode' can automatically
+  ;; disable the minor mode, but must have this code to turn it on.
+  (lambda ()
+    (when (apply 'derived-mode-p prepaint-modes)
+      (prepaint-mode 1)))
+  :group 'prepaint)
 
 ;;}}}
 ;;{{{ Match functions
@@ -301,21 +196,7 @@ With arg, turn Prepaint mode on globally if and only if arg is positive."
 
 ;;{{{ The end
 
-(unless (assq 'prepaint-mode minor-mode-alist)
-  (push '(prepaint-mode prepaint-mode-text)
-	minor-mode-alist))
-(unless (assq 'global-prepaint-mode minor-mode-alist)
-  (push '(global-prepaint-mode global-prepaint-mode-text)
-	minor-mode-alist))
-
 (provide 'prepaint)
-
-(run-hooks 'prepaint-load-hook)
-
-;; This makes it possible to set Global Prepaint mode from
-;; Customize.
-(if global-prepaint-mode
-    (global-prepaint-mode 1))
 
 ;;}}}
 
